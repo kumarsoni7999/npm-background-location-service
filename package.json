@@ -56,13 +56,13 @@
   ],
   "author": "inforahul",
   "license": "MIT",
-  "homepage": "https://github.com/inforahul/rn-background-location-service#readme",
+  "homepage": "https://github.com/kumarsoni7999/npm-background-location-service#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/inforahul/rn-background-location-service.git"
+    "url": "git+https://github.com/kumarsoni7999/npm-background-location-service.git"
   },
   "bugs": {
-    "url": "https://github.com/inforahul/rn-background-location-service/issues"
+    "url": "https://github.com/kumarsoni7999/npm-background-location-service/issues"
   },
   "publishConfig": {
     "access": "public"
