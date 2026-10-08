@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Permissions + components merge into the host app via Gradle Manifest Merger.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+  <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+  <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+  <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+  <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+  <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+  <uses-permission android:name="android.permission.WAKE_LOCK" />
+  <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+  <application>
+    <service
+      android:name="com.inforahul.backgroundlocation.BackgroundForegroundService"
+      android:enabled="true"
+      android:exported="false"
+      android:foregroundServiceType="location" />
+
+    <activity
+      android:name="com.inforahul.backgroundlocation.PermissionRequestActivity"
+      android:excludeFromRecents="true"
+      android:exported="false"
+      android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+    <receiver
+      android:name="com.inforahul.backgroundlocation.NotificationActionReceiver"
+      android:exported="false">
+      <intent-filter>
+        <action android:name="com.inforahul.backgroundlocation.ACTION_STOP" />
+        <action android:name="com.inforahul.backgroundlocation.ACTION_ASK_PERMISSION" />
+      </intent-filter>
+    </receiver>
+  </application>
+</manifest>

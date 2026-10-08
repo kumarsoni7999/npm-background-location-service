@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+example/node_modules/
+example/server/node_modules/
+
+# Build
+lib/
+*.tgz
+dist/
+build/
+*.tsbuildinfo
+
+# Native
+android/build/
+android/.gradle/
+android/local.properties
+ios/build/
+ios/Pods/
+*.xcworkspace
+!default.xcworkspace
+*.xcuserstate
+DerivedData/
+
+# Example native
+example/android/app/build/
+example/android/.gradle/
+example/ios/Pods/
+example/ios/build/
+example/vendor/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+*.log
+npm-debug.log*
+yarn-error.log*
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Coverage
+coverage/
+.jest/
