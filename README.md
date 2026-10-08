@@ -396,15 +396,45 @@ interface BackgroundLocation {
 
 ---
 
-## Offline queue & sync
+## Offline queue & sync (in-memory only)
 
-When the network is unavailable, location payloads are queued locally and retried later.
+No third-party libraries (no AsyncStorage, no NetInfo).
+
+When a location POST fails because the device is offline / network error:
+
+1. Coordinate payload is stored in an **in-memory** queue
+2. On the next successful network attempt (new location or `sync.interval` timer), queued items are POSTed to your API oldest-first
+3. Successful items are removed from memory
 
 ```text
-Location → Payload → Queue → Network?
-                              ├─ No  → Keep in queue
-                              └─ Yes → POST API → success (remove) / failure (retry)
+Location → build body → POST API
+                           ├─ success → done (+ flush memory queue if any)
+                           └─ offline/network error → push to memory queue
+                                                      ↓
+                         every sync.interval / next online success
+                                                      ↓
+                                              POST queued items
 ```
+
+```ts
+await BackgroundService.configure({
+  sync: {
+    enabled: true,
+    interval: 30000, // also used to retry flushing the memory queue
+    endpoint: 'https://your-api.example.com/location',
+    method: 'POST',
+    headers: { Authorization: 'Bearer YOUR_TOKEN' },
+    body: { userId: '123' },
+  },
+  queue: {
+    enabled: true,   // default behavior when enabled
+    maxItems: 1000,  // drop oldest if over limit
+    retryCount: 5,   // for HTTP errors while online
+  },
+});
+```
+
+**Note:** The memory queue is lost if the app JS process is fully killed. While the process stays alive (including Android foreground service keeping the app warm), offline points are kept and sent when internet returns.
 
 Do not put API secrets inside the package. Pass tokens via `configure({ sync: { headers } })` from your app.
 

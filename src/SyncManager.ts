@@ -7,14 +7,19 @@ type QueueEntry = {
   payload: Record<string, unknown>;
   retries: number;
   maxRetries: number;
+  createdAt: number;
+  lastError?: string;
 };
+
+/** In-memory only — no AsyncStorage / NetInfo / other libraries. */
+const queue: QueueEntry[] = [];
+const seenIds = new Set<string>();
 
 let activeConfig: BackgroundServiceConfig | null = null;
 let unsubscribeLocation: (() => void) | null = null;
 let syncTimer: ReturnType<typeof setInterval> | null = null;
 let lastSyncAt: number | undefined;
-const queue: QueueEntry[] = [];
-const seenIds = new Set<string>();
+let flushing = false;
 
 function debugLog(config: BackgroundServiceConfig | null, message: string): void {
   if (config?.debug) {
@@ -29,10 +34,35 @@ function getEventId(payload: Record<string, unknown>): string {
     : `evt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function isNetworkFailure(error: string): boolean {
+  const e = error.toLowerCase();
+  return (
+    e.includes('network') ||
+    e.includes('failed to fetch') ||
+    e.includes('offline') ||
+    e.includes('internet') ||
+    e.includes('timed out') ||
+    e.includes('timeout') ||
+    e.includes('connection') ||
+    e.includes('unreachable') ||
+    e.includes('network request failed')
+  );
+}
+
+function emitQueueStatus(config: BackgroundServiceConfig): void {
+  emitLocal('queueUpdated', {
+    total: queue.length,
+    pending: queue.length,
+    failed: 0,
+    syncing: flushing ? 1 : 0,
+    maxItems: config.queue?.maxItems ?? 1000,
+  });
+}
+
 async function postPayload(
   config: BackgroundServiceConfig,
   payload: Record<string, unknown>,
-): Promise<{ ok: boolean; status?: number; error?: string }> {
+): Promise<{ ok: boolean; status?: number; error?: string; offline?: boolean }> {
   const endpoint = config.sync?.endpoint;
   if (!endpoint) {
     return { ok: false, error: 'missing_endpoint' };
@@ -58,7 +88,7 @@ async function postPayload(
     if (!response.ok) {
       const error = `HTTP_${response.status}`;
       emitLocal('syncFailed', { eventId, error });
-      return { ok: false, status: response.status, error };
+      return { ok: false, status: response.status, error, offline: false };
     }
 
     lastSyncAt = Date.now();
@@ -67,18 +97,24 @@ async function postPayload(
   } catch (err) {
     const error = err instanceof Error ? err.message : 'network_error';
     emitLocal('syncFailed', { eventId, error });
-    return { ok: false, error };
+    return { ok: false, error, offline: isNetworkFailure(error) || true };
   }
 }
 
-function enqueue(payload: Record<string, unknown>, config: BackgroundServiceConfig): void {
+function enqueue(
+  payload: Record<string, unknown>,
+  config: BackgroundServiceConfig,
+  lastError?: string,
+): void {
+  if (config.queue?.enabled === false) return;
+
   const eventId = getEventId(payload);
   if (seenIds.has(eventId)) return;
 
   const maxItems = config.queue?.maxItems ?? 1000;
   const maxRetries = config.queue?.retryCount ?? 5;
 
-  if (queue.length >= maxItems) {
+  while (queue.length >= maxItems) {
     const dropped = queue.shift();
     if (dropped) seenIds.delete(dropped.eventId);
   }
@@ -88,43 +124,60 @@ function enqueue(payload: Record<string, unknown>, config: BackgroundServiceConf
     payload: { ...payload, eventId },
     retries: 0,
     maxRetries,
+    createdAt: Date.now(),
+    lastError,
   });
   seenIds.add(eventId);
-  emitLocal('queueUpdated', {
-    total: queue.length,
-    pending: queue.length,
-    failed: 0,
-    syncing: 0,
-    maxItems,
-  });
+  emitQueueStatus(config);
+  debugLog(config, `Offline: saved in memory (${queue.length} pending)`);
 }
 
+/**
+ * When internet is back, POST every queued coordinate (oldest first).
+ * Uses only fetch — no NetInfo / AsyncStorage.
+ */
 async function flushQueue(config: BackgroundServiceConfig): Promise<void> {
+  if (flushing) return;
   if (!config.sync?.enabled || !config.sync.endpoint) return;
+  if (config.queue?.enabled === false) return;
   if (queue.length === 0) return;
 
-  const item = queue[0];
-  const result = await postPayload(config, item.payload);
+  flushing = true;
+  emitQueueStatus(config);
 
-  if (result.ok) {
-    queue.shift();
-    seenIds.delete(item.eventId);
-  } else {
-    item.retries += 1;
-    if (item.retries > item.maxRetries) {
-      queue.shift();
-      seenIds.delete(item.eventId);
-      debugLog(config, `Dropped queued item after max retries: ${item.eventId}`);
+  try {
+    while (queue.length > 0) {
+      const item = queue[0];
+      const result = await postPayload(config, item.payload);
+
+      if (result.ok) {
+        queue.shift();
+        seenIds.delete(item.eventId);
+        emitQueueStatus(config);
+        continue;
+      }
+
+      // Still offline / network error → keep queue, try again later
+      if (result.offline) {
+        debugLog(config, 'Still offline — keeping memory queue');
+        break;
+      }
+
+      // Server error while online — retry with limit
+      item.retries += 1;
+      item.lastError = result.error;
+      if (item.retries > item.maxRetries) {
+        queue.shift();
+        seenIds.delete(item.eventId);
+        debugLog(config, `Dropped after max retries: ${item.eventId}`);
+      }
+      emitQueueStatus(config);
+      break;
     }
+  } finally {
+    flushing = false;
+    emitQueueStatus(config);
   }
-
-  emitLocal('queueUpdated', {
-    total: queue.length,
-    pending: queue.length,
-    failed: 0,
-    syncing: 0,
-    maxItems: config.queue?.maxItems ?? 1000,
-  });
 }
 
 async function handleLocation(location: BackgroundLocation): Promise<void> {
@@ -135,9 +188,17 @@ async function handleLocation(location: BackgroundLocation): Promise<void> {
   const queueEnabled = config.queue?.enabled !== false;
 
   const result = await postPayload(config, payload);
-  if (!result.ok && queueEnabled) {
-    enqueue(payload, config);
-    debugLog(config, 'Sync failed — payload queued for retry');
+
+  if (result.ok) {
+    // Internet works — also drain anything stored while offline
+    if (queue.length > 0) {
+      void flushQueue(config);
+    }
+    return;
+  }
+
+  if (queueEnabled) {
+    enqueue(payload, config, result.error);
   }
 }
 
@@ -160,6 +221,11 @@ export const SyncManager = {
     syncTimer = setInterval(() => {
       if (activeConfig) void flushQueue(activeConfig);
     }, interval);
+
+    if (activeConfig) {
+      emitQueueStatus(activeConfig);
+      void flushQueue(activeConfig);
+    }
   },
 
   stop(): void {
@@ -184,5 +250,10 @@ export const SyncManager = {
   clearQueue(): void {
     queue.length = 0;
     seenIds.clear();
+    if (activeConfig) emitQueueStatus(activeConfig);
+  },
+
+  async flushNow(): Promise<void> {
+    if (activeConfig) await flushQueue(activeConfig);
   },
 };
