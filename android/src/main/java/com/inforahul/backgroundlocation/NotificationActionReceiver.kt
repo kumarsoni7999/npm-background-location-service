@@ -19,6 +19,10 @@ class NotificationActionReceiver : BroadcastReceiver() {
         context.startService(stop)
         EventEmitter.emit("stopped", null)
       }
+      NotificationHelper.ACTION_REPOST -> {
+        // Swipe/clear attempted — keep notification while tracking is enabled
+        NotificationHelper.repostIfRunning(context)
+      }
       NotificationHelper.ACTION_ASK_PERMISSION -> {
         val access = PermissionUtils.accessState(context)
         if (access == PermissionUtils.AccessState.GPS_OFF ||

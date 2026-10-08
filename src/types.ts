@@ -51,6 +51,8 @@ export interface SyncConfig {
   body?: Record<string, unknown>;
 }
 
+export type NotificationStyle = 'default' | 'bigText' | 'bigPicture' | 'chronometer';
+
 export interface NotificationConfig {
   title: string;
   description: string;
@@ -58,6 +60,44 @@ export interface NotificationConfig {
   channelName?: string;
   /** Android drawable resource name (without extension), e.g. "ic_notification" */
   smallIcon?: string;
+  /** Large icon: drawable name or file/content/https URI */
+  largeIcon?: string;
+  /**
+   * Big picture / banner image (file/content/https URI or drawable name).
+   * Note: Android notifications do not play animated GIFs; a still frame/image is shown.
+   */
+  imageUri?: string;
+  /** Alias of imageUri for big-picture style */
+  bigPictureUri?: string;
+  /** Visual style (default: bigText when denied/custom text, else default) */
+  style?: NotificationStyle;
+  /** Show a running timer/chronometer in the notification */
+  showTimer?: boolean;
+  /** Epoch ms when the timer started (default: now when service starts) */
+  timerStartAt?: number;
+  /** Count-down chronometer instead of count-up */
+  chronometerCountDown?: boolean;
+  /** Accent color as #RRGGBB or #AARRGGBB */
+  color?: string;
+  /** Custom title when location/GPS is denied */
+  deniedTitle?: string;
+  /** Custom body when location/GPS is denied */
+  deniedDescription?: string;
+  allowButtonText?: string;
+  stopButtonText?: string;
+  /**
+   * Host-app Android layout resource name for a custom collapsed notification
+   * (place XML under your app `res/layout/`, e.g. `bls_custom_notification`).
+   * Views with ids `bls_title`, `bls_text`, `bls_timer` are filled when present.
+   */
+  customLayout?: string;
+  /** Expanded custom layout resource name (optional) */
+  customExpandedLayout?: string;
+  /**
+   * When true (default), show Allow action on the notification if permission/GPS denied.
+   * Overridden by start({ requireLocationPermission: false }).
+   */
+  showAllowWhenDenied?: boolean;
 }
 
 export interface QueueConfig {
@@ -75,6 +115,13 @@ export interface BackgroundServiceConfig {
   sync?: SyncConfig;
   notification?: NotificationConfig;
   queue?: QueueConfig;
+  /**
+   * When true (default), location permission is required for tracking UX:
+   * start will request it, and if denied the Android notification shows Allow
+   * and keeps prompting via that action.
+   * When false, the service can start without forcing permission / Allow UI.
+   */
+  requireLocationPermission?: boolean;
   /** Custom payload shape for sync requests */
   payloadTransformer?: PayloadTransformer;
   /** Enable verbose SDK logging (never logs tokens/PII) */
@@ -148,6 +195,21 @@ export interface NotificationUpdateOptions {
   title?: string;
   description?: string;
   smallIcon?: string;
+  largeIcon?: string;
+  imageUri?: string;
+  bigPictureUri?: string;
+  style?: NotificationStyle;
+  showTimer?: boolean;
+  timerStartAt?: number;
+  chronometerCountDown?: boolean;
+  color?: string;
+  deniedTitle?: string;
+  deniedDescription?: string;
+  allowButtonText?: string;
+  stopButtonText?: string;
+  customLayout?: string;
+  customExpandedLayout?: string;
+  showAllowWhenDenied?: boolean;
 }
 
 export interface DefaultLocationPayload {

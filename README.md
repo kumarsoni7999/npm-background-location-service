@@ -197,9 +197,14 @@ BackgroundService.on('location', (location) => {
   console.log(location.latitude, location.longitude, location.timestamp);
 });
 
-// Asks for permissions first, then starts the native service
-const result = await BackgroundService.start();
-console.log(result); // { started, permissionsGranted, gpsEnabled }
+// Location permission required (default): asks, and if denied shows Allow on notification
+const result = await BackgroundService.start({
+  requireLocationPermission: true,
+});
+console.log(result); // { started, permissionsGranted, gpsEnabled, requireLocationPermission }
+
+// Or start without forcing location permission / Allow UI
+// await BackgroundService.start({ requireLocationPermission: false });
 
 // Later
 await BackgroundService.stop();
@@ -227,6 +232,88 @@ And includes action buttons:
 | **Stop** | Stops the background service |
 
 While tracking is healthy, the notification shows your configured title/description and still includes **Stop**.
+
+**Non-dismissible:** While background location is running, the Android notification cannot be swiped away or cleared (`setOngoing(true)`, `FLAG_NO_CLEAR`). If the OS still removes it on Android 14+, it is **re-posted immediately**. Remove it only via **Stop** or `BackgroundService.stop()`.
+
+### `requireLocationPermission` on start
+
+```ts
+// Required (default): request permission; if denied, notification shows Allow and keeps asking
+await BackgroundService.start({ requireLocationPermission: true });
+
+// Not required: start service without forcing permission / Allow button
+await BackgroundService.start({ requireLocationPermission: false });
+```
+
+You can also set the default in configure:
+
+```ts
+await BackgroundService.configure({
+  requireLocationPermission: true,
+  notification: { title: 'Tracking', description: 'Active' },
+});
+```
+
+### Customize notification (image / timer / custom layout)
+
+```ts
+await BackgroundService.configure({
+  notification: {
+    title: 'Trip tracking',
+    description: 'Sharing your live location',
+    style: 'bigPicture',          // 'default' | 'bigText' | 'bigPicture' | 'chronometer'
+    imageUri: 'https://example.com/banner.png', // or drawable name / file:// / content://
+    largeIcon: 'ic_launcher',     // drawable in your app
+    showTimer: true,              // chronometer in notification
+    timerStartAt: Date.now(),
+    color: '#2563EB',
+    deniedTitle: 'Location needed',
+    deniedDescription: 'Tap Allow to enable GPS & permission',
+    allowButtonText: 'Allow',
+    stopButtonText: 'Stop',
+    // Optional: your own Android layout under res/layout/
+    // customLayout: 'bls_custom_notification',
+    // customExpandedLayout: 'bls_custom_notification_big',
+  },
+});
+
+// Update live (e.g. change image / restart timer text)
+await BackgroundService.updateNotification({
+  description: 'Last sync just now',
+  showTimer: true,
+});
+```
+
+**GIF note:** Android system notifications do not play animated GIFs. Use a static image / PNG / first frame.
+
+For a **fully custom in-app Allow UI** (React component), use `LocationPermissionPrompt`:
+
+```tsx
+import {
+  LocationPermissionPrompt,
+  BackgroundService,
+} from '@inforahul/rn-background-location-service';
+
+// Default Allow card
+<LocationPermissionPrompt
+  onGranted={() => BackgroundService.start({ requireLocationPermission: true })}
+/>
+
+// Your own component via render prop
+<LocationPermissionPrompt>
+  {({ granted, loading, requestAllow, openSettings }) => (
+    // build any UI: GIF, timer, branding, etc.
+    <MyCustomAllowCard
+      loading={loading}
+      onAllow={requestAllow}
+      onSettings={openSettings}
+      visible={!granted}
+    />
+  )}
+</LocationPermissionPrompt>
+```
+
+Custom Android notification layout tip: in your app `res/layout/bls_custom_notification.xml`, use ids `bls_title`, `bls_text`, and optional `bls_timer` (Chronometer).
 
 ```ts
 // Default: request permissions, then start (even if denied, so notification can guide the user)

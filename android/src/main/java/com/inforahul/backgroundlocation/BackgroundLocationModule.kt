@@ -36,6 +36,17 @@ class BackgroundLocationModule(
   fun configure(configJson: String, promise: Promise) {
     try {
       ServiceConfigStore.saveConfig(reactContext, configJson)
+      val json = org.json.JSONObject(configJson)
+      if (json.has("requireLocationPermission")) {
+        ServiceConfigStore.setRequireLocationPermission(
+          reactContext,
+          json.optBoolean("requireLocationPermission", true),
+        )
+      }
+      val notification = json.optJSONObject("notification")
+      if (notification != null && notification.has("showAllowWhenDenied")) {
+        // keep in notification object already saved via configJson
+      }
       promise.resolve(true)
     } catch (e: Exception) {
       promise.reject("INVALID_CONFIGURATION", e.message, e)
@@ -45,6 +56,7 @@ class BackgroundLocationModule(
   @ReactMethod
   fun start(promise: Promise) {
     try {
+      ServiceConfigStore.ensureTimerStart(reactContext)
       BackgroundForegroundService.start(reactContext)
       promise.resolve(true)
     } catch (e: Exception) {

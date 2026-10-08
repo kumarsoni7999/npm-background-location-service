@@ -33,6 +33,7 @@
       <intent-filter>
         <action android:name="com.inforahul.backgroundlocation.ACTION_STOP" />
         <action android:name="com.inforahul.backgroundlocation.ACTION_ASK_PERMISSION" />
+        <action android:name="com.inforahul.backgroundlocation.ACTION_REPOST" />
       </intent-filter>
     </receiver>
   </application>

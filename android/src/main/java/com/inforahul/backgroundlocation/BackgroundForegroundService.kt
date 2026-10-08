@@ -39,13 +39,15 @@ class BackgroundForegroundService : Service() {
         return START_NOT_STICKY
       }
       ACTION_REFRESH -> {
-        NotificationHelper.update(this)
+        // Re-assert non-dismissible FGS notification (e.g. after swipe attempt)
+        startAsForeground()
         maybeStartOrStopLocationUpdates()
         return START_STICKY
       }
       else -> {
         ServiceConfigStore.setRunning(this, true)
         ServiceConfigStore.setPaused(this, false)
+        ServiceConfigStore.ensureTimerStart(this)
         startAsForeground()
         maybeStartOrStopLocationUpdates()
         handler.removeCallbacks(refreshRunnable)
@@ -132,6 +134,7 @@ class BackgroundForegroundService : Service() {
     stopLocationUpdates()
     ServiceConfigStore.setRunning(this, false)
     ServiceConfigStore.setPaused(this, false)
+    ServiceConfigStore.clearTimerStart(this)
     stopForeground(STOP_FOREGROUND_REMOVE)
     stopSelf()
   }

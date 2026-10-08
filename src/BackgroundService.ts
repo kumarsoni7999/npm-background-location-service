@@ -19,12 +19,23 @@ import type {
 } from './types';
 
 export interface StartOptions {
-  /** Ask runtime permissions before starting (default: true) */
+  /**
+   * Ask the system for location (and related) permissions before start.
+   * Default: same as `requireLocationPermission` (usually true).
+   */
   requestPermissions?: boolean;
+  /**
+   * If true, location permission is required:
+   * - requests permission on start
+   * - if still denied, Android notification shows **Allow** and keeps asking
+   * If false, start without forcing permission / Allow UI.
+   * Default: `configure({ requireLocationPermission })` or true.
+   */
+  requireLocationPermission?: boolean;
   /**
    * If permissions/GPS are still denied after asking, still start the
    * foreground service so the notification can show "not allowed" + Allow/Stop.
-   * Default: true on Android.
+   * Default: true on Android when requireLocationPermission is true.
    */
   startEvenIfDenied?: boolean;
 }
@@ -33,39 +44,79 @@ let configured = false;
 let jsConfig: BackgroundServiceConfig = {};
 
 function serializeConfigForNative(config: BackgroundServiceConfig): string {
-  // Functions cannot cross the native bridge
   const { payloadTransformer: _payloadTransformer, ...rest } = config;
   return JSON.stringify(rest);
 }
 
+async function pushConfigToNative(config: BackgroundServiceConfig): Promise<void> {
+  jsConfig = config;
+  SyncManager.setConfig(config);
+  if (!isNativeAvailable()) {
+    configured = true;
+    return;
+  }
+  await getNativeModule().configure(serializeConfigForNative(config));
+  configured = true;
+}
+
 const BackgroundService = {
   async configure(config: BackgroundServiceConfig): Promise<void> {
-    jsConfig = config;
-    SyncManager.setConfig(config);
-
-    if (!isNativeAvailable()) {
-      configured = true;
-      return;
-    }
-    await getNativeModule().configure(serializeConfigForNative(config));
-    configured = true;
+    await pushConfigToNative({ ...jsConfig, ...config });
   },
 
   /**
-   * Asks for location / notification permissions first, then starts the
-   * native background service. On Android, if GPS or permission is still
-   * denied, the persistent notification shows that status with Allow / Stop.
+   * Optionally requires location permission, then starts the native background service.
+   * On Android, if permission is required and denied, the notification shows Allow
+   * and tapping it asks again.
    */
   async start(options: StartOptions = {}): Promise<{
     started: boolean;
     permissionsGranted: boolean;
     gpsEnabled: boolean;
+    requireLocationPermission: boolean;
   }> {
-    const requestPermissions = options.requestPermissions !== false;
-    const startEvenIfDenied =
-      options.startEvenIfDenied ?? Platform.OS === 'android';
+    const requireLocationPermission =
+      options.requireLocationPermission ??
+      jsConfig.requireLocationPermission ??
+      true;
 
-    if (requestPermissions) {
+    const requestPermissions =
+      options.requestPermissions ?? requireLocationPermission;
+
+    const startEvenIfDenied =
+      options.startEvenIfDenied ??
+      (Platform.OS === 'android' && requireLocationPermission);
+
+    // Persist flag for native notification Allow button behavior
+    await pushConfigToNative({
+      ...jsConfig,
+      requireLocationPermission,
+      notification: {
+        title: jsConfig.notification?.title ?? 'Location Tracking',
+        description:
+          jsConfig.notification?.description ?? 'Location tracking is active',
+        ...jsConfig.notification,
+        showAllowWhenDenied: requireLocationPermission
+          ? jsConfig.notification?.showAllowWhenDenied !== false
+          : false,
+      },
+    });
+
+    if (isNativeAvailable()) {
+      // Native store for Allow button + timer
+      try {
+        await getNativeModule().configure(
+          serializeConfigForNative({
+            ...jsConfig,
+            requireLocationPermission,
+          }),
+        );
+      } catch (_err) {
+        // ignore
+      }
+    }
+
+    if (requestPermissions && requireLocationPermission) {
       await requestAllTrackingPermissions();
     }
 
@@ -73,7 +124,11 @@ const BackgroundService = {
     const gpsEnabled = Boolean(status.locationServicesEnabled);
     const permissionsGranted = await hasRequiredLocationAccess();
 
-    if (!gpsEnabled && Platform.OS === 'android') {
+    if (
+      requireLocationPermission &&
+      !gpsEnabled &&
+      Platform.OS === 'android'
+    ) {
       try {
         await openLocationSettings();
       } catch (_err) {
@@ -81,8 +136,13 @@ const BackgroundService = {
       }
     }
 
-    if (!permissionsGranted && !startEvenIfDenied) {
-      return { started: false, permissionsGranted, gpsEnabled };
+    if (requireLocationPermission && !permissionsGranted && !startEvenIfDenied) {
+      return {
+        started: false,
+        permissionsGranted,
+        gpsEnabled,
+        requireLocationPermission,
+      };
     }
 
     if (!isNativeAvailable()) {
@@ -92,24 +152,28 @@ const BackgroundService = {
     }
 
     if (!configured) {
-      await getNativeModule().configure(
-        JSON.stringify({
-          location: { enabled: true },
-          notification: {
-            title: 'Location Tracking',
-            description: 'Location tracking is active',
-            channelId: 'background-location',
-            channelName: 'Background Location',
-          },
-        }),
-      );
-      configured = true;
+      await pushConfigToNative({
+        location: { enabled: true },
+        requireLocationPermission,
+        notification: {
+          title: 'Location Tracking',
+          description: 'Location tracking is active',
+          channelId: 'background-location',
+          channelName: 'Background Location',
+          showAllowWhenDenied: requireLocationPermission,
+        },
+      });
     }
 
     SyncManager.setConfig(jsConfig);
     SyncManager.start();
     await getNativeModule().start();
-    return { started: true, permissionsGranted, gpsEnabled };
+    return {
+      started: true,
+      permissionsGranted,
+      gpsEnabled,
+      requireLocationPermission,
+    };
   },
 
   async stop(): Promise<void> {
@@ -154,6 +218,16 @@ const BackgroundService = {
   },
 
   async updateNotification(options: NotificationUpdateOptions): Promise<void> {
+    jsConfig = {
+      ...jsConfig,
+      notification: {
+        title: jsConfig.notification?.title ?? 'Location Tracking',
+        description:
+          jsConfig.notification?.description ?? 'Location tracking is active',
+        ...jsConfig.notification,
+        ...options,
+      },
+    };
     if (!isNativeAvailable()) return;
     await getNativeModule().updateNotification?.(JSON.stringify(options));
   },
